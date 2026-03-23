@@ -1,45 +1,11 @@
-import CommentSection from "./CommentSection";
-
-export default function PostCard({
-  p,
-  users,
-  user,
-  giveImpact,
-  followUser,
-  comments,
-  commentText,
-  setCommentText,
-  addComment
-}) {
-  const author = users.find(u => u.id === p.createdBy);
+export default function PostCard({ post }) {
+  if (!post) return null;
 
   return (
-    <div style={{
-      background: "white",
-      padding: 16,
-      borderRadius: 12,
-      marginBottom: 16
-    }}>
-      <p><b>{author?.name || "User"}</b></p>
-      <p>{p.content}</p>
-      <p>💎 {p.impact}</p>
-
-      <button onClick={() => giveImpact(p)}>Impact ⚡</button>
-
-      <CommentSection
-        comments={comments}
-        users={users}
-        postId={p.id}
-        commentText={commentText}
-        setCommentText={setCommentText}
-        addComment={addComment}
-      />
-
-      {p.createdBy !== user?.uid && (
-        <button onClick={() => followUser(p.createdBy)}>
-          Follow
-        </button>
-      )}
+    <div className="p-6 bg-white rounded-xl shadow max-w-xl">
+      <p className="text-lg">
+        {post?.content || "No content"}
+      </p>
     </div>
   );
 }
