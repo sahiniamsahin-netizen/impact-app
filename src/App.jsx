@@ -1,271 +1,205 @@
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
-import { auth, provider } from "./firebase";
 
 import {
   collection,
   addDoc,
-  onSnapshot,
+  getDocs,
   updateDoc,
   doc,
   increment,
-  serverTimestamp,
-  query,
-  orderBy,
   setDoc,
-  getDoc,
+  getDoc
 } from "firebase/firestore";
 
 import {
+  getAuth,
+  GoogleAuthProvider,
   signInWithPopup,
-  signOut,
-  onAuthStateChanged,
+  onAuthStateChanged
 } from "firebase/auth";
 
-function App() {
+export default function App() {
   const [posts, setPosts] = useState([]);
   const [text, setText] = useState("");
   const [user, setUser] = useState(null);
-  const [impactPoints, setImpactPoints] = useState(0);
-  const [userCredibility, setUserCredibility] = useState(1);
-  const [darkMode, setDarkMode] = useState(false);
+  const [credibility, setCredibility] = useState(1);
 
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [canImpact, setCanImpact] = useState(false);
-  const [delayDone, setDelayDone] = useState(false);
+  const auth = getAuth();
 
-  const [streak, setStreak] = useState(0);
+  // 🔐 LOGIN
+  const login = async () => {
+    const provider = new GoogleAuthProvider();
+    const result = await signInWithPopup(auth, provider);
+    setUser(result.user);
+  };
 
-  const currentPost = posts[currentIndex];
+  // 👤 USER SETUP
+  const setupUser = async (u) => {
+    const userRef = doc(db, "users", u.uid);
+    const snap = await getDoc(userRef);
 
-  // 🔥 Smart feed
+    if (!snap.exists()) {
+      await setDoc(userRef, {
+        name: u.displayName,
+        credibility: 1,
+        impactPoints: 0,
+        streak: 1
+      });
+      setCredibility(1);
+    } else {
+      setCredibility(snap.data().credibility || 1);
+    }
+  };
+
   useEffect(() => {
-    const q = query(collection(db, "posts"), orderBy("score", "desc"));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setPosts(data);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // 🔐 Auth + Wallet + Credibility
-  useEffect(() => {
-    onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-
-      if (currentUser) {
-        const userRef = doc(db, "users", currentUser.uid);
-        const snap = await getDoc(userRef);
-
-        if (snap.exists()) {
-          const data = snap.data();
-          setImpactPoints(data.impactPoints);
-          setUserCredibility(data.credibility || 1);
-          setStreak(data.streak || 0);
-        } else {
-          await setDoc(userRef, {
-            impactPoints: 10,
-            credibility: 1,
-            streak: 0,
-          });
-          setImpactPoints(10);
-          setUserCredibility(1);
-          setStreak(0);
-        }
+    onAuthStateChanged(auth, (u) => {
+      if (u) {
+        setUser(u);
+        setupUser(u);
       }
     });
+    fetchPosts();
   }, []);
 
-  const login = async () => {
-    await signInWithPopup(auth, provider);
+  // 📥 FETCH POSTS
+  const fetchPosts = async () => {
+    const snapshot = await getDocs(collection(db, "posts"));
+    const data = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    setPosts(data);
   };
 
-  const logout = async () => {
-    await signOut(auth);
-  };
+  // ✍️ CREATE POST
+  const handlePost = async () => {
+    if (!user) {
+      alert("Login first 😏");
+      return;
+    }
 
-  // 🧠 AI-like scoring
-  const getTextScore = (text) => {
-    let score = 0;
-    if (text.length > 50) score += 1;
-    if (text.length > 100) score += 2;
-    if (text.includes("?")) score += 1;
-    if (text.toLowerCase().includes("why")) score += 1;
-    if (text.toLowerCase().includes("how")) score += 1;
-    return score;
-  };
-
-  // 📝 Add post
-  const addPost = async () => {
-    if (!text || !user) return;
-
-    const baseScore = getTextScore(text);
+    if (!text.trim()) return;
 
     await addDoc(collection(db, "posts"), {
       content: text,
       impact: 0,
-      score: baseScore,
-      createdAt: serverTimestamp(),
-      userName: user.displayName,
-      userId: user.uid,
-      impactGivenBy: [],
+      createdBy: user.uid,
+      impactedBy: [],
+      createdAt: new Date()
     });
 
     setText("");
+    fetchPosts();
   };
 
-  // ⏳ Read + Think system
-  useEffect(() => {
-    setCanImpact(false);
-    setDelayDone(false);
-
-    const readTimer = setTimeout(() => {
-      setCanImpact(true);
-      setImpactPoints((prev) => prev + 1); // 💰 earn
-    }, 8000);
-
-    const thinkTimer = setTimeout(() => {
-      setDelayDone(true);
-    }, 3000);
-
-    return () => {
-      clearTimeout(readTimer);
-      clearTimeout(thinkTimer);
-    };
-  }, [currentIndex]);
-
-  // 💎 Impact system
-  const giveImpact = async (post) => {
-    if (!user) return;
-
-    if (impactPoints <= 0) {
-      alert("No points left!");
+  // ⚡ GIVE IMPACT
+  const giveImpact = async (id, p) => {
+    if (!user) {
+      alert("Login first 😏");
       return;
     }
 
-    if (post.impactGivenBy?.includes(user.uid)) {
-      alert("Already impacted!");
+    // ❌ self boost block
+    if (p.createdBy === user.uid) {
+      alert("You can't support your own thought 😏");
       return;
     }
 
-    const postRef = doc(db, "posts", post.id);
+    // ❌ multiple click block
+    if (p.impactedBy?.includes(user.uid)) {
+      alert("Already supported 😏");
+      return;
+    }
+
+    const postRef = doc(db, "posts", id);
     const userRef = doc(db, "users", user.uid);
-    const ownerRef = doc(db, "users", post.userId);
 
-    const weightedScore = 1 * userCredibility;
+    const impactValue = Math.max(1, Math.floor(credibility * 5));
 
     await updateDoc(postRef, {
-      impact: increment(1),
-      score: increment(weightedScore),
-      impactGivenBy: [...(post.impactGivenBy || []), user.uid],
+      impact: increment(impactValue),
+      impactedBy: [...(p.impactedBy || []), user.uid]
     });
 
     await updateDoc(userRef, {
-      impactPoints: impactPoints - 1,
-      streak: streak + 1,
+      impactPoints: increment(1),
+      credibility: increment(0.05)
     });
 
-    await updateDoc(ownerRef, {
-      credibility: increment(0.1),
-    });
-
-    setImpactPoints(impactPoints - 1);
-    setStreak(streak + 1);
+    fetchPosts();
   };
 
-  const formatTime = (timestamp) => {
-    if (!timestamp) return "just now";
-    const diff = Math.floor((new Date() - timestamp.toDate()) / 1000);
-    if (diff < 60) return "just now";
-    if (diff < 3600) return Math.floor(diff / 60) + " min ago";
-    return Math.floor(diff / 3600) + " hr ago";
-  };
+  // 🧠 SPLIT FEED
 
-  const bg = darkMode ? "#0f172a" : "#eef2ff";
-  const card = darkMode ? "#1e293b" : "white";
-  const textColor = darkMode ? "white" : "#111";
+  const myPosts = posts.filter(p => p.createdBy === user?.uid);
+
+  let publicPosts = posts.filter(p => p.createdBy !== user?.uid);
+
+  // 🔥 SMART SORT (fresh + impact)
+  publicPosts.sort((a, b) => {
+    const timeA = new Date(a.createdAt).getTime();
+    const timeB = new Date(b.createdAt).getTime();
+
+    const scoreA = (a.impact || 0) * 1000 + timeA;
+    const scoreB = (b.impact || 0) * 1000 + timeB;
+
+    return scoreB - scoreA;
+  });
 
   return (
-    <div style={{ background: bg, minHeight: "100vh", padding: "20px", color: textColor }}>
-      <div style={{ maxWidth: "600px", margin: "auto" }}>
+    <div style={{ padding: 20, fontFamily: "sans-serif", maxWidth: 600, margin: "auto" }}>
+      
+      <h1>🧠 Your App</h1>
 
-        <h1 style={{ textAlign: "center" }}>🧠 MindFeed</h1>
+      {!user ? (
+        <button onClick={login}>Login with Google</button>
+      ) : (
+        <p>
+          👤 {user.displayName} | Cred: {credibility.toFixed(2)}
+        </p>
+      )}
 
-        <button onClick={() => setDarkMode(!darkMode)}>
-          Toggle {darkMode ? "Light" : "Dark"}
-        </button>
+      {/* POST BOX */}
+      <textarea
+        placeholder="Write something meaningful..."
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        style={{ width: "100%", padding: 10 }}
+      />
 
-        {!user ? (
-          <button onClick={login}>Login</button>
-        ) : (
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <p>
-              👤 {user.displayName}  
-              <br />
-              💎 Cred: {userCredibility.toFixed(2)}  
-              <br />
-              🔥 Streak: {streak}
-            </p>
-            <button onClick={logout}>Logout</button>
-          </div>
-        )}
+      <button onClick={handlePost} style={{ marginTop: 10 }}>
+        Post
+      </button>
 
-        <p>💰 Points: {impactPoints}</p>
+      {/* 🟢 MY SPACE */}
+      <h2 style={{ marginTop: 30 }}>🧠 My Space</h2>
 
-        {/* 🏅 Badges */}
-        <div>
-          {streak > 5 && <span>🔥 Deep Thinker </span>}
-          {userCredibility > 2 && <span>💎 High Value </span>}
-          {impactPoints > 20 && <span>📚 Deep Reader </span>}
+      {myPosts.map((p) => (
+        <div key={p.id} style={{ marginBottom: 20, padding: 10, border: "1px solid #ddd" }}>
+          <p>{p.content}</p>
+          <p>💎 {p.impact}</p>
         </div>
+      ))}
 
-        {currentPost && (
-          <div style={{
-            background: card,
-            padding: "20px",
-            borderRadius: "15px",
-            marginTop: "20px"
-          }}>
-            <p style={{ fontSize: "20px" }}>{currentPost.content}</p>
+      {/* 🌍 PUBLIC SPACE */}
+      <h2 style={{ marginTop: 30 }}>🌍 Public Space</h2>
 
-            <small>
-              {currentPost.userName} • {formatTime(currentPost.createdAt)}
-            </small>
+      {publicPosts.map((p) => (
+        <div key={p.id} style={{ marginBottom: 20, padding: 10, border: "1px solid #ddd" }}>
+          
+          {Date.now() - new Date(p.createdAt).getTime() < 600000 && (
+            <span>🔥 New Thought</span>
+          )}
 
-            <p>💎 {currentPost.impact} | 🧠 {currentPost.score?.toFixed(2)}</p>
+          <p>{p.content}</p>
+          <p>💎 {p.impact}</p>
 
-            <button
-              disabled={!canImpact || !delayDone}
-              onClick={() => giveImpact(currentPost)}
-            >
-              {!canImpact ? "Reading..." : !delayDone ? "Thinking..." : "❤️ Impact"}
-            </button>
-          </div>
-        )}
-
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: "20px" }}>
-          <button onClick={() => setCurrentIndex(Math.max(0, currentIndex - 1))}>⬅️</button>
-          <button onClick={() => setCurrentIndex(Math.min(posts.length - 1, currentIndex + 1))}>➡️</button>
+          <button onClick={() => giveImpact(p.id, p)}>
+            Support Thought 🌱
+          </button>
         </div>
-
-        <div style={{ marginTop: "20px" }}>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Write something meaningful..."
-            style={{ width: "100%", padding: "10px" }}
-          />
-          <button onClick={addPost}>Post</button>
-        </div>
-
-      </div>
+      ))}
     </div>
   );
 }
-
-export default App;
