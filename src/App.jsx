@@ -9,7 +9,9 @@ import {
   doc,
   increment,
   setDoc,
-  getDoc
+  getDoc,
+  query,
+  where
 } from "firebase/firestore";
 
 import {
@@ -21,7 +23,10 @@ import {
 
 export default function App() {
   const [posts, setPosts] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [notifications, setNotifications] = useState([]);
   const [text, setText] = useState("");
+  const [commentText, setCommentText] = useState({});
   const [user, setUser] = useState(null);
   const [credibility, setCredibility] = useState(1);
 
@@ -36,17 +41,17 @@ export default function App() {
 
   // 👤 USER SETUP
   const setupUser = async (u) => {
-    const userRef = doc(db, "users", u.uid);
-    const snap = await getDoc(userRef);
+    const ref = doc(db, "users", u.uid);
+    const snap = await getDoc(ref);
 
     if (!snap.exists()) {
-      await setDoc(userRef, {
+      await setDoc(ref, {
         name: u.displayName,
         credibility: 1,
         impactPoints: 0,
-        streak: 1
+        followers: [],
+        following: []
       });
-      setCredibility(1);
     } else {
       setCredibility(snap.data().credibility || 1);
     }
@@ -59,26 +64,41 @@ export default function App() {
         setupUser(u);
       }
     });
+
     fetchPosts();
+    fetchUsers();
   }, []);
 
-  // 📥 FETCH POSTS
+  // 📥 POSTS
   const fetchPosts = async () => {
-    const snapshot = await getDocs(collection(db, "posts"));
-    const data = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data()
-    }));
-    setPosts(data);
+    const snap = await getDocs(collection(db, "posts"));
+    setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
   };
 
-  // ✍️ CREATE POST
-  const handlePost = async () => {
-    if (!user) {
-      alert("Login first 😏");
-      return;
-    }
+  // 👥 USERS
+  const fetchUsers = async () => {
+    const snap = await getDocs(collection(db, "users"));
+    setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  };
 
+  // 🔔 NOTIFICATIONS
+  const fetchNotifications = async () => {
+    if (!user) return;
+    const q = query(
+      collection(db, "notifications"),
+      where("to", "==", user.uid)
+    );
+    const snap = await getDocs(q);
+    setNotifications(snap.docs.map(d => d.data()));
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [user]);
+
+  // ✍️ POST
+  const handlePost = async () => {
+    if (!user) return alert("Login first");
     if (!text.trim()) return;
 
     await addDoc(collection(db, "posts"), {
@@ -93,111 +113,182 @@ export default function App() {
     fetchPosts();
   };
 
-  // ⚡ GIVE IMPACT
+  // ⚡ IMPACT
   const giveImpact = async (id, p) => {
-    if (!user) {
-      alert("Login first 😏");
-      return;
-    }
+    if (!user) return;
 
-    // ❌ self boost block
-    if (p.createdBy === user.uid) {
-      alert("You can't support your own thought 😏");
-      return;
-    }
+    if (p.createdBy === user.uid) return alert("No self boost");
 
-    // ❌ multiple click block
-    if (p.impactedBy?.includes(user.uid)) {
-      alert("Already supported 😏");
-      return;
-    }
+    if (p.impactedBy?.includes(user.uid))
+      return alert("Already supported");
 
     const postRef = doc(db, "posts", id);
-    const userRef = doc(db, "users", user.uid);
-
-    const impactValue = Math.max(1, Math.floor(credibility * 5));
 
     await updateDoc(postRef, {
-      impact: increment(impactValue),
+      impact: increment(1),
       impactedBy: [...(p.impactedBy || []), user.uid]
     });
 
-    await updateDoc(userRef, {
-      impactPoints: increment(1),
-      credibility: increment(0.05)
+    // 🔔 notify owner
+    await addDoc(collection(db, "notifications"), {
+      type: "impact",
+      to: p.createdBy,
+      from: user.uid,
+      createdAt: new Date()
     });
 
     fetchPosts();
+    fetchNotifications();
   };
 
-  // 🧠 SPLIT FEED
+  // 💬 COMMENT
+  const addComment = async (postId) => {
+    if (!user) return;
+
+    const text = commentText[postId];
+    if (!text) return;
+
+    await addDoc(collection(db, "comments"), {
+      postId,
+      text,
+      userId: user.uid,
+      createdAt: new Date()
+    });
+
+    setCommentText(prev => ({ ...prev, [postId]: "" }));
+  };
+
+  // 👥 FOLLOW
+  const followUser = async (targetId) => {
+    if (!user) return;
+
+    const myRef = doc(db, "users", user.uid);
+
+    const me = users.find(u => u.id === user.uid);
+
+    if (me.following?.includes(targetId)) return;
+
+    await updateDoc(myRef, {
+      following: [...(me.following || []), targetId]
+    });
+
+    // 🔔 notify
+    await addDoc(collection(db, "notifications"), {
+      type: "follow",
+      to: targetId,
+      from: user.uid,
+      createdAt: new Date()
+    });
+
+    fetchUsers();
+  };
+
+  // 🧠 FEEDS
 
   const myPosts = posts.filter(p => p.createdBy === user?.uid);
 
-  let publicPosts = posts.filter(p => p.createdBy !== user?.uid);
+  const myProfile = users.find(u => u.id === user?.uid);
 
-  // 🔥 SMART SORT (fresh + impact)
-  publicPosts.sort((a, b) => {
-    const timeA = new Date(a.createdAt).getTime();
-    const timeB = new Date(b.createdAt).getTime();
+  const followingIds = myProfile?.following || [];
 
-    const scoreA = (a.impact || 0) * 1000 + timeA;
-    const scoreB = (b.impact || 0) * 1000 + timeB;
+  const followingPosts = posts.filter(p =>
+    followingIds.includes(p.createdBy)
+  );
 
-    return scoreB - scoreA;
-  });
+  const publicPosts = posts.filter(p => p.createdBy !== user?.uid);
+
+  // 🏆 LEADERBOARD
+  const leaderboard = [...users].sort(
+    (a, b) => (b.credibility || 0) - (a.credibility || 0)
+  );
 
   return (
-    <div style={{ padding: 20, fontFamily: "sans-serif", maxWidth: 600, margin: "auto" }}>
-      
-      <h1>🧠 Your App</h1>
+    <div style={{ padding: 20, maxWidth: 600, margin: "auto" }}>
+      <h1>🔥 Your App</h1>
 
       {!user ? (
-        <button onClick={login}>Login with Google</button>
+        <button onClick={login}>Login</button>
       ) : (
-        <p>
-          👤 {user.displayName} | Cred: {credibility.toFixed(2)}
-        </p>
+        <p>👤 {user.displayName}</p>
       )}
 
-      {/* POST BOX */}
+      {/* POST */}
       <textarea
-        placeholder="Write something meaningful..."
         value={text}
         onChange={(e) => setText(e.target.value)}
-        style={{ width: "100%", padding: 10 }}
       />
+      <button onClick={handlePost}>Post</button>
 
-      <button onClick={handlePost} style={{ marginTop: 10 }}>
-        Post
-      </button>
-
-      {/* 🟢 MY SPACE */}
-      <h2 style={{ marginTop: 30 }}>🧠 My Space</h2>
-
-      {myPosts.map((p) => (
-        <div key={p.id} style={{ marginBottom: 20, padding: 10, border: "1px solid #ddd" }}>
-          <p>{p.content}</p>
-          <p>💎 {p.impact}</p>
+      {/* 🔔 NOTIFICATIONS */}
+      <h2>🔔 Notifications</h2>
+      {notifications.map((n, i) => (
+        <div key={i}>
+          {n.type} from {n.from}
         </div>
       ))}
 
-      {/* 🌍 PUBLIC SPACE */}
-      <h2 style={{ marginTop: 30 }}>🌍 Public Space</h2>
-
-      {publicPosts.map((p) => (
-        <div key={p.id} style={{ marginBottom: 20, padding: 10, border: "1px solid #ddd" }}>
-          
-          {Date.now() - new Date(p.createdAt).getTime() < 600000 && (
-            <span>🔥 New Thought</span>
-          )}
-
+      {/* MY */}
+      <h2>🧠 My Space</h2>
+      {myPosts.map(p => (
+        <div key={p.id}>
           <p>{p.content}</p>
-          <p>💎 {p.impact}</p>
+        </div>
+      ))}
+
+      {/* FOLLOWING */}
+      <h2>👥 Following</h2>
+      {followingPosts.map(p => (
+        <div key={p.id}>
+          <p>{p.content}</p>
+        </div>
+      ))}
+
+      {/* PUBLIC */}
+      <h2>🌍 Public</h2>
+      {publicPosts.map(p => (
+        <div key={p.id}>
+          <p>{p.content}</p>
 
           <button onClick={() => giveImpact(p.id, p)}>
-            Support Thought 🌱
+            Support
           </button>
+
+          {/* 💬 COMMENTS */}
+          <input
+            value={commentText[p.id] || ""}
+            onChange={(e) =>
+              setCommentText(prev => ({
+                ...prev,
+                [p.id]: e.target.value
+              }))
+            }
+            placeholder="Reply..."
+          />
+          <button onClick={() => addComment(p.id)}>Reply</button>
+
+          {/* 👥 FOLLOW */}
+          {p.createdBy !== user?.uid && (
+            <button onClick={() => followUser(p.createdBy)}>
+              Follow
+            </button>
+          )}
+        </div>
+      ))}
+
+      {/* PROFILE */}
+      <h2>👤 Profile</h2>
+      {myProfile && (
+        <div>
+          <p>Cred: {myProfile.credibility}</p>
+          <p>Points: {myProfile.impactPoints}</p>
+        </div>
+      )}
+
+      {/* LEADERBOARD */}
+      <h2>🏆 Leaderboard</h2>
+      {leaderboard.slice(0, 5).map((u, i) => (
+        <div key={u.id}>
+          #{i + 1} {u.name}
         </div>
       ))}
     </div>
