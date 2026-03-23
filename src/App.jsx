@@ -27,8 +27,6 @@ export default function App() {
 
   const [text, setText] = useState("");
   const [user, setUser] = useState(null);
-
-  // 👉 instead of index
   const [currentPost, setCurrentPost] = useState(null);
 
   const auth = getAuth();
@@ -68,12 +66,11 @@ export default function App() {
     });
   }, []);
 
-  // REALTIME POSTS
+  // POSTS (REALTIME + SAFE)
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "posts"), (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-      // sort
       const sorted = data.sort((a, b) => {
         const scoreA =
           (a.impact || 0) - (Date.now() - (a.createdAt || 0)) * 0.000001;
@@ -85,7 +82,7 @@ export default function App() {
 
       setPosts(sorted);
 
-      // 🔥 CRITICAL: keep currentPost valid
+      // 🔥 KEEP CURRENT POST VALID
       setCurrentPost(prev => {
         if (!prev) return sorted[0] || null;
 
@@ -105,7 +102,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // USERS
+  // USERS (SAFE)
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "users"), (snap) => {
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -113,7 +110,8 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  const userMap = Object.fromEntries(users.map(u => [u.id, u]));
+  // SAFE USER MAP
+  const userMap = Object.fromEntries((users || []).map(u => [u.id, u]));
 
   // POST
   const handlePost = async () => {
@@ -153,25 +151,26 @@ export default function App() {
     });
   };
 
-  // FOLLOW
+  // FOLLOW (FULL SAFE)
   const followUser = async (targetId) => {
-    if (!user) return;
+    if (!user || !users.length) return;
 
     const me = users.find(u => u.id === user.uid);
     const target = users.find(u => u.id === targetId);
 
-    if (me?.following?.includes(targetId)) return;
+    if (!me || !target) return;
+    if (me.following?.includes(targetId)) return;
 
     await updateDoc(doc(db, "users", user.uid), {
-      following: [...(me?.following || []), targetId]
+      following: [...(me.following || []), targetId]
     });
 
     await updateDoc(doc(db, "users", targetId), {
-      followers: [...(target?.followers || []), user.uid]
+      followers: [...(target.followers || []), user.uid]
     });
   };
 
-  // NAVIGATION (safe)
+  // NAVIGATION (SAFE)
   const goNext = () => {
     if (!currentPost) return;
     const index = posts.findIndex(p => p.id === currentPost.id);
@@ -186,11 +185,29 @@ export default function App() {
     if (prev) setCurrentPost(prev);
   };
 
-  // EMPTY
+  // EMPTY STATE
   if (!currentPost) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f3efe7]">
-        <p>No posts yet</p>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#f3efe7]">
+        <p className="mb-4">No posts yet</p>
+
+        {!user ? (
+          <button onClick={login} className="bg-black text-white px-4 py-2 rounded">
+            Login
+          </button>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Write first post..."
+              className="border px-3 py-2 rounded"
+            />
+            <button onClick={handlePost} className="bg-black text-white px-3 py-2 rounded">
+              Post
+            </button>
+          </div>
+        )}
       </div>
     );
   }
