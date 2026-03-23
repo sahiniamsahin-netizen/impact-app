@@ -31,7 +31,7 @@ export default function App() {
 
   const auth = getAuth();
 
-  // 🔐 LOGIN
+  // LOGIN
   const login = async () => {
     const provider = new GoogleAuthProvider();
     const result = await signInWithPopup(auth, provider);
@@ -43,7 +43,7 @@ export default function App() {
     setUser(null);
   };
 
-  // 👤 USER SETUP
+  // USER SETUP
   const setupUser = async (u) => {
     const ref = doc(db, "users", u.uid);
     const snap = await getDoc(ref);
@@ -66,7 +66,7 @@ export default function App() {
     });
   }, []);
 
-  // ⚡ REALTIME
+  // REALTIME
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "posts"), (snap) => {
       setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -88,10 +88,10 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // 🧠 USER MAP
+  // USER MAP
   const userMap = Object.fromEntries(users.map(u => [u.id, u]));
 
-  // 🧠 ALGORITHM
+  // ALGORITHM
   const sortedPosts = [...posts].sort((a, b) => {
     const scoreA =
       (a.impact || 0) - (Date.now() - (a.createdAt || 0)) * 0.000001;
@@ -101,9 +101,16 @@ export default function App() {
     return scoreB - scoreA;
   });
 
+  // 🔥 INDEX FIX (IMPORTANT)
+  useEffect(() => {
+    if (currentIndex >= sortedPosts.length) {
+      setCurrentIndex(0);
+    }
+  }, [sortedPosts.length]);
+
   const currentPost = sortedPosts[currentIndex] || null;
 
-  // ✍️ POST
+  // POST
   const handlePost = async () => {
     if (!user || !text.trim()) return;
 
@@ -118,7 +125,7 @@ export default function App() {
     setText("");
   };
 
-  // ⚡ IMPACT
+  // IMPACT
   const giveImpact = async (p) => {
     if (!user || !p) return;
     if (p.createdBy === user.uid) return;
@@ -130,7 +137,7 @@ export default function App() {
     });
   };
 
-  // 💬 COMMENT
+  // COMMENT
   const addComment = async (postId, text) => {
     if (!user || !text) return;
 
@@ -141,7 +148,7 @@ export default function App() {
     });
   };
 
-  // 👥 FOLLOW
+  // FOLLOW
   const followUser = async (targetId) => {
     if (!user) return;
 
@@ -159,7 +166,7 @@ export default function App() {
     });
   };
 
-  // ⌨️ NAVIGATION
+  // KEYBOARD NAV
   useEffect(() => {
     const handleKey = (e) => {
       if (e.key === "ArrowDown") {
@@ -174,7 +181,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKey);
   }, [sortedPosts.length]);
 
-  // ❗ BLANK FIX
+  // EMPTY STATE
   if (!currentPost) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#f3efe7]">
