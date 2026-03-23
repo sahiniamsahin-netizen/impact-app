@@ -18,7 +18,8 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
-  onAuthStateChanged
+  onAuthStateChanged,
+  signOut
 } from "firebase/auth";
 
 export default function App() {
@@ -29,16 +30,22 @@ export default function App() {
   const [commentText, setCommentText] = useState({});
   const [user, setUser] = useState(null);
   const [credibility, setCredibility] = useState(1);
-  const [dark, setDark] = useState(true);
 
   const auth = getAuth();
 
+  // 🔐 LOGIN / LOGOUT
   const login = async () => {
     const provider = new GoogleAuthProvider();
     const result = await signInWithPopup(auth, provider);
     setUser(result.user);
   };
 
+  const logout = async () => {
+    await signOut(auth);
+    setUser(null);
+  };
+
+  // 👤 USER SETUP
   const setupUser = async (u) => {
     const ref = doc(db, "users", u.uid);
     const snap = await getDoc(ref);
@@ -68,6 +75,7 @@ export default function App() {
     fetchUsers();
   }, []);
 
+  // 📥 FETCH
   const fetchPosts = async () => {
     const snap = await getDocs(collection(db, "posts"));
     setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -80,8 +88,14 @@ export default function App() {
 
   const fetchNotifications = async () => {
     if (!user) return;
-    const q = query(collection(db, "notifications"), where("to", "==", user.uid));
+
+    const q = query(
+      collection(db, "notifications"),
+      where("to", "==", user.uid)
+    );
+
     const snap = await getDocs(q);
+
     setNotifications(snap.docs.map(d => d.data()));
   };
 
@@ -89,6 +103,7 @@ export default function App() {
     fetchNotifications();
   }, [user]);
 
+  // ✍️ POST
   const handlePost = async () => {
     if (!user) return alert("Login first");
     if (!text.trim()) return;
@@ -105,10 +120,14 @@ export default function App() {
     fetchPosts();
   };
 
+  // ⚡ IMPACT
   const giveImpact = async (id, p) => {
     if (!user) return;
-    if (p.createdBy === user.uid) return;
-    if (p.impactedBy?.includes(user.uid)) return;
+
+    if (p.createdBy === user.uid) return alert("No self boost");
+
+    if (p.impactedBy?.includes(user.uid))
+      return alert("Already supported");
 
     await updateDoc(doc(db, "posts", id), {
       impact: increment(1),
@@ -118,7 +137,7 @@ export default function App() {
     await addDoc(collection(db, "notifications"), {
       type: "impact",
       to: p.createdBy,
-      from: user.uid,
+      from: user.displayName,
       createdAt: new Date()
     });
 
@@ -126,8 +145,10 @@ export default function App() {
     fetchNotifications();
   };
 
+  // 💬 COMMENT
   const addComment = async (postId) => {
     if (!user) return;
+
     const text = commentText[postId];
     if (!text) return;
 
@@ -141,10 +162,13 @@ export default function App() {
     setCommentText(prev => ({ ...prev, [postId]: "" }));
   };
 
+  // 👥 FOLLOW (FIXED)
   const followUser = async (targetId) => {
     if (!user) return;
 
     const myRef = doc(db, "users", user.uid);
+    const targetRef = doc(db, "users", targetId);
+
     const me = users.find(u => u.id === user.uid);
 
     if (me.following?.includes(targetId)) return;
@@ -153,46 +177,54 @@ export default function App() {
       following: [...(me.following || []), targetId]
     });
 
+    await updateDoc(targetRef, {
+      followers: increment(1)
+    });
+
     await addDoc(collection(db, "notifications"), {
       type: "follow",
       to: targetId,
-      from: user.uid,
+      from: user.displayName,
       createdAt: new Date()
     });
 
     fetchUsers();
   };
 
+  // 🧠 FEEDS
+
   const myPosts = posts.filter(p => p.createdBy === user?.uid);
+
   const myProfile = users.find(u => u.id === user?.uid);
+
   const followingIds = myProfile?.following || [];
-  const followingPosts = posts.filter(p => followingIds.includes(p.createdBy));
+
+  const followingPosts = posts.filter(p =>
+    followingIds.includes(p.createdBy)
+  );
+
   const publicPosts = posts.filter(p => p.createdBy !== user?.uid);
 
   const leaderboard = [...users].sort(
     (a, b) => (b.credibility || 0) - (a.credibility || 0)
   );
 
-  const bg = dark ? "#0f172a" : "#f9fafb";
-  const textColor = dark ? "#e5e7eb" : "#111827";
-
-  const cardStyle = {
-    backdropFilter: "blur(10px)",
-    background: dark ? "rgba(255,255,255,0.05)" : "white",
+  const card = {
+    background: "white",
     padding: 16,
     borderRadius: 12,
     marginBottom: 16,
-    border: "1px solid rgba(255,255,255,0.1)"
+    boxShadow: "0 2px 8px rgba(0,0,0,0.05)"
   };
 
   const btn = {
     padding: "6px 10px",
     borderRadius: 8,
     border: "none",
-    background: "#6366f1",
+    background: "#111827",
     color: "white",
-    cursor: "pointer",
-    marginTop: 6
+    marginTop: 6,
+    cursor: "pointer"
   };
 
   return (
@@ -200,75 +232,76 @@ export default function App() {
       padding: 20,
       maxWidth: 500,
       margin: "auto",
-      background: bg,
-      color: textColor,
+      background: "#f9fafb",
       minHeight: "100vh"
     }}>
 
       <h1>🧠 App</h1>
 
-      <button onClick={() => setDark(!dark)} style={btn}>
-        Toggle {dark ? "Light" : "Dark"}
-      </button>
-
       {!user ? (
-        <button onClick={login} style={btn}>Login</button>
+        <button style={btn} onClick={login}>Login</button>
       ) : (
-        <p>👤 {user.displayName}</p>
+        <>
+          <p>👤 {user.displayName}</p>
+          <button style={btn} onClick={logout}>Logout</button>
+        </>
       )}
 
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        style={{
-          width: "100%",
-          padding: 12,
-          borderRadius: 10,
-          marginTop: 10
-        }}
+        style={{ width: "100%", padding: 10 }}
       />
+      <button style={btn} onClick={handlePost}>Post</button>
 
-      <button onClick={handlePost} style={btn}>Post</button>
-
+      {/* 🔔 */}
       <h2>🔔 Notifications</h2>
       {notifications.map((n, i) => (
-        <div key={i} style={cardStyle}>
+        <div key={i} style={card}>
           {n.type} from {n.from}
         </div>
       ))}
 
       <h2>🧠 My Space</h2>
       {myPosts.map(p => (
-        <div key={p.id} style={cardStyle}>
+        <div key={p.id} style={card}>
           <p>{p.content}</p>
         </div>
       ))}
 
       <h2>👥 Following</h2>
       {followingPosts.map(p => (
-        <div key={p.id} style={cardStyle}>
+        <div key={p.id} style={card}>
           <p>{p.content}</p>
         </div>
       ))}
 
       <h2>🌍 Public</h2>
       {publicPosts.map(p => (
-        <div key={p.id} style={cardStyle}>
+        <div key={p.id} style={card}>
           <p>{p.content}</p>
-          <button onClick={() => giveImpact(p.id, p)} style={btn}>Support</button>
+          <p>💎 {p.impact}</p>
+
+          <button style={btn} onClick={() => giveImpact(p.id, p)}>
+            Impact ⚡
+          </button>
 
           <input
             value={commentText[p.id] || ""}
             onChange={(e) =>
-              setCommentText(prev => ({ ...prev, [p.id]: e.target.value }))
+              setCommentText(prev => ({
+                ...prev,
+                [p.id]: e.target.value
+              }))
             }
             placeholder="Reply..."
-            style={{ width: "100%", marginTop: 8 }}
           />
-          <button onClick={() => addComment(p.id)} style={btn}>Reply</button>
+          <button style={btn} onClick={() => addComment(p.id)}>
+            Reply
+          </button>
 
           {p.createdBy !== user?.uid && (
-            <button onClick={() => followUser(p.createdBy)} style={btn}>
+            <button style={btn} onClick={() => followUser(p.createdBy)}>
               Follow
             </button>
           )}
@@ -277,7 +310,7 @@ export default function App() {
 
       <h2>🏆 Leaderboard</h2>
       {leaderboard.slice(0, 5).map((u, i) => (
-        <div key={u.id} style={cardStyle}>
+        <div key={u.id} style={card}>
           #{i + 1} {u.name}
         </div>
       ))}
