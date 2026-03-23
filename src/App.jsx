@@ -107,10 +107,10 @@ export default function App() {
     return () => unsub();
   }, [user]);
 
-  // ⚡ USER MAP (performance)
+  // ⚡ USER MAP
   const userMap = Object.fromEntries(users.map(u => [u.id, u]));
 
-  // 🧠 ALGORITHM
+  // 🧠 ALGORITHM (impact + freshness)
   const sortedPosts = [...posts].sort((a, b) => {
     const scoreA =
       (a.impact || 0) - (Date.now() - (a.createdAt || 0)) * 0.000001;
@@ -184,39 +184,36 @@ export default function App() {
     });
   };
 
-  // 📱 SWIPE
-  let startY = 0;
+  // ⌨️ KEYBOARD NAVIGATION
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === "ArrowDown") {
+        setCurrentIndex(i => i < sortedPosts.length - 1 ? i + 1 : i);
+      }
+      if (e.key === "ArrowUp") {
+        setCurrentIndex(i => i > 0 ? i - 1 : i);
+      }
+    };
 
-  const handleTouchStart = (e) => {
-    startY = e.touches[0].clientY;
-  };
-
-  const handleTouchEnd = (e) => {
-    const endY = e.changedTouches[0].clientY;
-    const diff = startY - endY;
-
-    if (diff > 50) {
-      setCurrentIndex(i => i < sortedPosts.length - 1 ? i + 1 : i);
-    } else if (diff < -50) {
-      setCurrentIndex(i => i > 0 ? i - 1 : i);
-    }
-  };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [sortedPosts.length]);
 
   return (
-    <div className="h-screen bg-black text-white flex flex-col items-center justify-center">
+    <div className="min-h-screen bg-[#f3efe7] flex flex-col items-center justify-center px-4">
 
       {/* LOGIN */}
       {!user ? (
         <button
           onClick={login}
-          className="bg-white text-black px-4 py-2 rounded-xl"
+          className="bg-black text-white px-5 py-2 rounded-xl"
         >
           Login
         </button>
       ) : (
-        <div className="absolute top-4 right-4 text-sm">
+        <div className="absolute top-4 right-6 text-sm text-gray-700">
           👤 {user.displayName}
-          <button onClick={logout} className="ml-2 text-red-400">
+          <button onClick={logout} className="ml-3 text-red-500">
             Logout
           </button>
         </div>
@@ -224,38 +221,43 @@ export default function App() {
 
       {/* POST INPUT */}
       {user && (
-        <div className="absolute top-4 left-4 flex gap-2">
+        <div className="absolute top-4 left-6 flex gap-2">
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Write..."
-            className="bg-zinc-800 px-3 py-2 rounded-lg text-sm outline-none"
+            placeholder="Write something meaningful..."
+            className="border px-3 py-2 rounded-lg text-sm bg-white"
           />
           <button
             onClick={handlePost}
-            className="bg-white text-black px-3 py-2 rounded-lg"
+            className="bg-black text-white px-3 py-2 rounded-lg"
           >
             Post
           </button>
         </div>
       )}
 
-      {/* SWIPE AREA */}
-      <div
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-      >
-        {currentPost && (
-          <PostCard
-            post={currentPost}
-            user={user}
-            userMap={userMap}
-            comments={comments}
-            addComment={addComment}
-            followUser={followUser}
-            giveImpact={giveImpact}
-          />
-        )}
+      {/* POST */}
+      {currentPost && (
+        <PostCard
+          post={currentPost}
+          user={user}
+          userMap={userMap}
+          comments={comments}
+          addComment={addComment}
+          followUser={followUser}
+          giveImpact={giveImpact}
+        />
+      )}
+
+      {/* NAVIGATION */}
+      <div className="mt-6 flex justify-between w-full max-w-2xl text-gray-600 text-sm">
+        <button onClick={() => setCurrentIndex(i => i > 0 ? i - 1 : i)}>
+          ↑ Previous
+        </button>
+        <button onClick={() => setCurrentIndex(i => i < sortedPosts.length - 1 ? i + 1 : i)}>
+          Next ↓
+        </button>
       </div>
     </div>
   );
