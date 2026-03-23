@@ -4,14 +4,14 @@ import { db } from "./firebase";
 import {
   collection,
   addDoc,
-  getDocs,
   updateDoc,
   doc,
   increment,
   setDoc,
   getDoc,
   query,
-  where
+  where,
+  onSnapshot
 } from "firebase/firestore";
 
 import {
@@ -30,13 +30,13 @@ export default function App() {
 
   const [text, setText] = useState("");
   const [commentText, setCommentText] = useState({});
+  const [typing, setTyping] = useState(false);
 
   const [user, setUser] = useState(null);
-  const [credibility, setCredibility] = useState(1);
 
   const auth = getAuth();
 
-  // 🔐 LOGIN / LOGOUT
+  // 🔐 LOGIN
   const login = async () => {
     const provider = new GoogleAuthProvider();
     const result = await signInWithPopup(auth, provider);
@@ -59,30 +59,59 @@ export default function App() {
         credibility: 1,
         impactPoints: 0,
         followers: 0,
-        following: []
+        following: [],
+        online: true
       });
-    } else {
-      setCredibility(snap.data().credibility || 1);
     }
   };
 
-  // 📥 FETCH FUNCTIONS
-  const fetchPosts = async () => {
-    const snap = await getDocs(collection(db, "posts"));
-    setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-  };
+  // 🔄 AUTH
+  useEffect(() => {
+    onAuthStateChanged(auth, (u) => {
+      if (u) {
+        setUser(u);
+        setupUser(u);
 
-  const fetchUsers = async () => {
-    const snap = await getDocs(collection(db, "users"));
-    setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-  };
+        updateDoc(doc(db, "users", u.uid), { online: true });
+      }
+    });
 
-  const fetchComments = async () => {
-    const snap = await getDocs(collection(db, "comments"));
-    setComments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-  };
+    return () => {
+      if (user) {
+        updateDoc(doc(db, "users", user.uid), { online: false });
+      }
+    };
+  }, []);
 
-  const fetchNotifications = async () => {
+  // ⚡ REAL-TIME POSTS
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "posts"), (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setPosts(data);
+    });
+    return () => unsub();
+  }, []);
+
+  // ⚡ USERS
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "users"), (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setUsers(data);
+    });
+    return () => unsub();
+  }, []);
+
+  // ⚡ COMMENTS
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "comments"), (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setComments(data);
+    });
+    return () => unsub();
+  }, []);
+
+  // ⚡ NOTIFICATIONS
+  useEffect(() => {
     if (!user) return;
 
     const q = query(
@@ -90,31 +119,17 @@ export default function App() {
       where("to", "==", user.uid)
     );
 
-    const snap = await getDocs(q);
-    setNotifications(snap.docs.map(d => d.data()));
-  };
-
-  // 🔄 INIT
-  useEffect(() => {
-    onAuthStateChanged(auth, (u) => {
-      if (u) {
-        setUser(u);
-        setupUser(u);
-      }
+    const unsub = onSnapshot(q, (snap) => {
+      const data = snap.docs.map(d => d.data());
+      setNotifications(data);
     });
 
-    fetchPosts();
-    fetchUsers();
-    fetchComments();
-  }, []);
-
-  useEffect(() => {
-    fetchNotifications();
+    return () => unsub();
   }, [user]);
 
   // ✍️ POST
   const handlePost = async () => {
-    if (!user) return alert("Login first");
+    if (!user) return;
     if (!text.trim()) return;
 
     await addDoc(collection(db, "posts"), {
@@ -126,17 +141,14 @@ export default function App() {
     });
 
     setText("");
-    fetchPosts();
+    setTyping(false);
   };
 
   // ⚡ IMPACT
   const giveImpact = async (id, p) => {
     if (!user) return;
-
-    if (p.createdBy === user.uid) return alert("No self boost");
-
-    if (p.impactedBy?.includes(user.uid))
-      return alert("Already supported");
+    if (p.createdBy === user.uid) return;
+    if (p.impactedBy?.includes(user.uid)) return;
 
     await updateDoc(doc(db, "posts", id), {
       impact: increment(1),
@@ -149,9 +161,6 @@ export default function App() {
       from: user.displayName,
       createdAt: new Date()
     });
-
-    fetchPosts();
-    fetchNotifications();
   };
 
   // 💬 COMMENT
@@ -169,54 +178,33 @@ export default function App() {
     });
 
     setCommentText(prev => ({ ...prev, [postId]: "" }));
-    fetchComments();
   };
 
   // 👥 FOLLOW
   const followUser = async (targetId) => {
     if (!user) return;
 
-    const myRef = doc(db, "users", user.uid);
-    const targetRef = doc(db, "users", targetId);
-
     const me = users.find(u => u.id === user.uid);
 
     if (me.following?.includes(targetId)) return;
 
-    await updateDoc(myRef, {
+    await updateDoc(doc(db, "users", user.uid), {
       following: [...(me.following || []), targetId]
     });
 
-    await updateDoc(targetRef, {
+    await updateDoc(doc(db, "users", targetId), {
       followers: increment(1)
     });
-
-    await addDoc(collection(db, "notifications"), {
-      type: "follow",
-      to: targetId,
-      from: user.displayName,
-      createdAt: new Date()
-    });
-
-    fetchUsers();
   };
 
-  // 🧠 FEEDS
-  const myPosts = posts.filter(p => p.createdBy === user?.uid);
-
-  const myProfile = users.find(u => u.id === user?.uid);
-
-  const followingIds = myProfile?.following || [];
-
-  const followingPosts = posts.filter(p =>
-    followingIds.includes(p.createdBy)
-  );
+  // 🔥 TRENDING
+  const trendingPosts = [...posts]
+    .sort((a, b) => (b.impact || 0) - (a.impact || 0))
+    .slice(0, 3);
 
   const publicPosts = posts.filter(p => p.createdBy !== user?.uid);
 
-  const leaderboard = [...users].sort(
-    (a, b) => (b.credibility || 0) - (a.credibility || 0)
-  );
+  const onlineUsers = users.filter(u => u.online);
 
   // 🎨 UI
   const card = {
@@ -257,12 +245,21 @@ export default function App() {
         </>
       )}
 
-      {/* POST */}
+      {/* 🟢 ONLINE */}
+      <h3>🟢 Online: {onlineUsers.length}</h3>
+
+      {/* ✍️ POST */}
       <textarea
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          setTyping(true);
+        }}
         style={{ width: "100%", padding: 10 }}
       />
+
+      {typing && <p>✍️ Typing...</p>}
+
       <button style={btn} onClick={handlePost}>Post</button>
 
       {/* 🔔 */}
@@ -273,11 +270,12 @@ export default function App() {
         </div>
       ))}
 
-      {/* 🧠 MY */}
-      <h2>🧠 My Space</h2>
-      {myPosts.map(p => (
+      {/* 🔥 TRENDING */}
+      <h2>🔥 Trending</h2>
+      {trendingPosts.map(p => (
         <div key={p.id} style={card}>
           <p>{p.content}</p>
+          <p>💎 {p.impact}</p>
         </div>
       ))}
 
@@ -295,15 +293,15 @@ export default function App() {
               Impact ⚡
             </button>
 
-            {/* 💬 COMMENTS */}
+            {/* COMMENTS */}
             {comments
               .filter(c => c.postId === p.id)
               .map(c => {
-                const userName =
+                const name =
                   users.find(u => u.id === c.userId)?.name || "User";
                 return (
-                  <div key={c.id} style={{ fontSize: 14 }}>
-                    💬 {userName}: {c.text}
+                  <div key={c.id}>
+                    💬 {name}: {c.text}
                   </div>
                 );
               })}
@@ -331,14 +329,6 @@ export default function App() {
           </div>
         );
       })}
-
-      {/* 🏆 */}
-      <h2>🏆 Leaderboard</h2>
-      {leaderboard.slice(0, 5).map((u, i) => (
-        <div key={u.id} style={card}>
-          #{i + 1} {u.name}
-        </div>
-      ))}
     </div>
   );
 }
