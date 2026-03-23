@@ -27,7 +27,9 @@ export default function App() {
 
   const [text, setText] = useState("");
   const [user, setUser] = useState(null);
-  const [currentIndex, setCurrentIndex] = useState(0);
+
+  // 👉 instead of index
+  const [currentPost, setCurrentPost] = useState(null);
 
   const auth = getAuth();
 
@@ -66,14 +68,36 @@ export default function App() {
     });
   }, []);
 
-  // REALTIME
+  // REALTIME POSTS
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "posts"), (snap) => {
-      setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      // sort
+      const sorted = data.sort((a, b) => {
+        const scoreA =
+          (a.impact || 0) - (Date.now() - (a.createdAt || 0)) * 0.000001;
+        const scoreB =
+          (b.impact || 0) - (Date.now() - (b.createdAt || 0)) * 0.000001;
+
+        return scoreB - scoreA;
+      });
+
+      setPosts(sorted);
+
+      // 🔥 CRITICAL: keep currentPost valid
+      setCurrentPost(prev => {
+        if (!prev) return sorted[0] || null;
+
+        const stillExists = sorted.find(p => p.id === prev.id);
+        return stillExists || sorted[0] || null;
+      });
     });
+
     return () => unsub();
   }, []);
 
+  // COMMENTS
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "comments"), (snap) => {
       setComments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -81,6 +105,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
+  // USERS
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "users"), (snap) => {
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -88,27 +113,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // USER MAP
   const userMap = Object.fromEntries(users.map(u => [u.id, u]));
-
-  // ALGORITHM
-  const sortedPosts = [...posts].sort((a, b) => {
-    const scoreA =
-      (a.impact || 0) - (Date.now() - (a.createdAt || 0)) * 0.000001;
-    const scoreB =
-      (b.impact || 0) - (Date.now() - (b.createdAt || 0)) * 0.000001;
-
-    return scoreB - scoreA;
-  });
-
-  // 🔥 INDEX FIX (IMPORTANT)
-  useEffect(() => {
-    if (currentIndex >= sortedPosts.length) {
-      setCurrentIndex(0);
-    }
-  }, [sortedPosts.length]);
-
-  const currentPost = sortedPosts[currentIndex] || null;
 
   // POST
   const handlePost = async () => {
@@ -166,65 +171,32 @@ export default function App() {
     });
   };
 
-  // KEYBOARD NAV
-  useEffect(() => {
-    const handleKey = (e) => {
-      if (e.key === "ArrowDown") {
-        setCurrentIndex(i => i < sortedPosts.length - 1 ? i + 1 : i);
-      }
-      if (e.key === "ArrowUp") {
-        setCurrentIndex(i => i > 0 ? i - 1 : i);
-      }
-    };
+  // NAVIGATION (safe)
+  const goNext = () => {
+    if (!currentPost) return;
+    const index = posts.findIndex(p => p.id === currentPost.id);
+    const next = posts[index + 1];
+    if (next) setCurrentPost(next);
+  };
 
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [sortedPosts.length]);
+  const goPrev = () => {
+    if (!currentPost) return;
+    const index = posts.findIndex(p => p.id === currentPost.id);
+    const prev = posts[index - 1];
+    if (prev) setCurrentPost(prev);
+  };
 
-  // EMPTY STATE
+  // EMPTY
   if (!currentPost) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[#f3efe7]">
-        <p className="text-gray-600 mb-4">No posts yet</p>
-
-        {!user ? (
-          <button
-            onClick={login}
-            className="bg-black text-white px-4 py-2 rounded"
-          >
-            Login
-          </button>
-        ) : (
-          <div className="flex gap-2">
-            <input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Write first post..."
-              className="border px-3 py-2 rounded"
-            />
-            <button
-              onClick={handlePost}
-              className="bg-black text-white px-3 py-2 rounded"
-            >
-              Post
-            </button>
-          </div>
-        )}
+      <div className="min-h-screen flex items-center justify-center bg-[#f3efe7]">
+        <p>No posts yet</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#f3efe7] flex flex-col items-center justify-center px-4">
-
-      {user && (
-        <div className="absolute top-4 right-6 text-sm text-gray-700">
-          👤 {user.displayName}
-          <button onClick={logout} className="ml-3 text-red-500">
-            Logout
-          </button>
-        </div>
-      )}
+    <div className="min-h-screen bg-[#f3efe7] flex flex-col items-center justify-center">
 
       <PostCard
         post={currentPost}
@@ -236,13 +208,9 @@ export default function App() {
         giveImpact={giveImpact}
       />
 
-      <div className="mt-6 flex justify-between w-full max-w-2xl text-gray-600 text-sm">
-        <button onClick={() => setCurrentIndex(i => i > 0 ? i - 1 : i)}>
-          ↑ Previous
-        </button>
-        <button onClick={() => setCurrentIndex(i => i < sortedPosts.length - 1 ? i + 1 : i)}>
-          Next ↓
-        </button>
+      <div className="mt-6 flex gap-10 text-sm">
+        <button onClick={goPrev}>↑ Prev</button>
+        <button onClick={goNext}>Next ↓</button>
       </div>
     </div>
   );
