@@ -25,9 +25,12 @@ import {
 export default function App() {
   const [posts, setPosts] = useState([]);
   const [users, setUsers] = useState([]);
+  const [comments, setComments] = useState([]);
   const [notifications, setNotifications] = useState([]);
+
   const [text, setText] = useState("");
   const [commentText, setCommentText] = useState({});
+
   const [user, setUser] = useState(null);
   const [credibility, setCredibility] = useState(1);
 
@@ -55,7 +58,7 @@ export default function App() {
         name: u.displayName,
         credibility: 1,
         impactPoints: 0,
-        followers: [],
+        followers: 0,
         following: []
       });
     } else {
@@ -63,19 +66,7 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    onAuthStateChanged(auth, (u) => {
-      if (u) {
-        setUser(u);
-        setupUser(u);
-      }
-    });
-
-    fetchPosts();
-    fetchUsers();
-  }, []);
-
-  // 📥 FETCH
+  // 📥 FETCH FUNCTIONS
   const fetchPosts = async () => {
     const snap = await getDocs(collection(db, "posts"));
     setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -84,6 +75,11 @@ export default function App() {
   const fetchUsers = async () => {
     const snap = await getDocs(collection(db, "users"));
     setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  };
+
+  const fetchComments = async () => {
+    const snap = await getDocs(collection(db, "comments"));
+    setComments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
   };
 
   const fetchNotifications = async () => {
@@ -95,9 +91,22 @@ export default function App() {
     );
 
     const snap = await getDocs(q);
-
     setNotifications(snap.docs.map(d => d.data()));
   };
+
+  // 🔄 INIT
+  useEffect(() => {
+    onAuthStateChanged(auth, (u) => {
+      if (u) {
+        setUser(u);
+        setupUser(u);
+      }
+    });
+
+    fetchPosts();
+    fetchUsers();
+    fetchComments();
+  }, []);
 
   useEffect(() => {
     fetchNotifications();
@@ -160,9 +169,10 @@ export default function App() {
     });
 
     setCommentText(prev => ({ ...prev, [postId]: "" }));
+    fetchComments();
   };
 
-  // 👥 FOLLOW (FIXED)
+  // 👥 FOLLOW
   const followUser = async (targetId) => {
     if (!user) return;
 
@@ -192,7 +202,6 @@ export default function App() {
   };
 
   // 🧠 FEEDS
-
   const myPosts = posts.filter(p => p.createdBy === user?.uid);
 
   const myProfile = users.find(u => u.id === user?.uid);
@@ -209,6 +218,7 @@ export default function App() {
     (a, b) => (b.credibility || 0) - (a.credibility || 0)
   );
 
+  // 🎨 UI
   const card = {
     background: "white",
     padding: 16,
@@ -247,6 +257,7 @@ export default function App() {
         </>
       )}
 
+      {/* POST */}
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -262,6 +273,7 @@ export default function App() {
         </div>
       ))}
 
+      {/* 🧠 MY */}
       <h2>🧠 My Space</h2>
       {myPosts.map(p => (
         <div key={p.id} style={card}>
@@ -269,45 +281,58 @@ export default function App() {
         </div>
       ))}
 
-      <h2>👥 Following</h2>
-      {followingPosts.map(p => (
-        <div key={p.id} style={card}>
-          <p>{p.content}</p>
-        </div>
-      ))}
-
+      {/* 🌍 PUBLIC */}
       <h2>🌍 Public</h2>
-      {publicPosts.map(p => (
-        <div key={p.id} style={card}>
-          <p>{p.content}</p>
-          <p>💎 {p.impact}</p>
+      {publicPosts.map(p => {
+        const author = users.find(u => u.id === p.createdBy);
 
-          <button style={btn} onClick={() => giveImpact(p.id, p)}>
-            Impact ⚡
-          </button>
+        return (
+          <div key={p.id} style={card}>
+            <p>{p.content}</p>
+            <p>💎 {p.impact}</p>
 
-          <input
-            value={commentText[p.id] || ""}
-            onChange={(e) =>
-              setCommentText(prev => ({
-                ...prev,
-                [p.id]: e.target.value
-              }))
-            }
-            placeholder="Reply..."
-          />
-          <button style={btn} onClick={() => addComment(p.id)}>
-            Reply
-          </button>
-
-          {p.createdBy !== user?.uid && (
-            <button style={btn} onClick={() => followUser(p.createdBy)}>
-              Follow
+            <button style={btn} onClick={() => giveImpact(p.id, p)}>
+              Impact ⚡
             </button>
-          )}
-        </div>
-      ))}
 
+            {/* 💬 COMMENTS */}
+            {comments
+              .filter(c => c.postId === p.id)
+              .map(c => {
+                const userName =
+                  users.find(u => u.id === c.userId)?.name || "User";
+                return (
+                  <div key={c.id} style={{ fontSize: 14 }}>
+                    💬 {userName}: {c.text}
+                  </div>
+                );
+              })}
+
+            <input
+              value={commentText[p.id] || ""}
+              onChange={(e) =>
+                setCommentText(prev => ({
+                  ...prev,
+                  [p.id]: e.target.value
+                }))
+              }
+              placeholder="Reply..."
+            />
+
+            <button style={btn} onClick={() => addComment(p.id)}>
+              Reply
+            </button>
+
+            {p.createdBy !== user?.uid && (
+              <button style={btn} onClick={() => followUser(p.createdBy)}>
+                Follow
+              </button>
+            )}
+          </div>
+        );
+      })}
+
+      {/* 🏆 */}
       <h2>🏆 Leaderboard</h2>
       {leaderboard.slice(0, 5).map((u, i) => (
         <div key={u.id} style={card}>
