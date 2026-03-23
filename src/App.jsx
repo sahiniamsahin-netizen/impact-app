@@ -32,6 +32,8 @@ export default function App() {
   const [user, setUser] = useState(null);
 
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [clicked, setClicked] = useState(false);
+  const [showComments, setShowComments] = useState(false);
 
   const auth = getAuth();
 
@@ -108,6 +110,18 @@ export default function App() {
     return () => unsub();
   }, [user]);
 
+  // ⚡ USER MAP (performance boost)
+  const userMap = Object.fromEntries(users.map(u => [u.id, u]));
+
+  // 🧠 ALGORITHM (impact + freshness)
+  const sortedPosts = [...posts].sort((a, b) => {
+    const scoreA = (a.impact || 0) - (Date.now() - (a.createdAt || 0)) * 0.000001;
+    const scoreB = (b.impact || 0) - (Date.now() - (b.createdAt || 0)) * 0.000001;
+    return scoreB - scoreA;
+  });
+
+  const currentPost = sortedPosts[currentIndex];
+
   // ✍️ POST
   const handlePost = async () => {
     if (!user || !text.trim()) return;
@@ -116,7 +130,8 @@ export default function App() {
       content: text,
       impact: 0,
       createdBy: user.uid,
-      impactedBy: []
+      impactedBy: [],
+      createdAt: Date.now()
     });
 
     setText("");
@@ -127,6 +142,9 @@ export default function App() {
     if (!user) return;
     if (p.createdBy === user.uid) return;
     if (p.impactedBy?.includes(user.uid)) return;
+
+    setClicked(true);
+    setTimeout(() => setClicked(false), 200);
 
     await updateDoc(doc(db, "posts", p.id), {
       impact: (p.impact || 0) + 1,
@@ -171,17 +189,36 @@ export default function App() {
     });
   };
 
-  const myProfile = users.find(u => u.id === user?.uid);
+  // 📱 SWIPE
+  let startY = 0;
+
+  const handleTouchStart = (e) => {
+    startY = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e) => {
+    const endY = e.changedTouches[0].clientY;
+    const diff = startY - endY;
+
+    if (diff > 50) {
+      setCurrentIndex(i => i < sortedPosts.length - 1 ? i + 1 : i);
+    } else if (diff < -50) {
+      setCurrentIndex(i => i > 0 ? i - 1 : i);
+    }
+  };
 
   // 🎨 UI
   const card = {
-    background: "white",
+    background: "rgba(255,255,255,0.05)",
+    backdropFilter: "blur(10px)",
     padding: 20,
-    borderRadius: 16,
-    minHeight: "300px",
+    borderRadius: 20,
+    color: "white",
+    height: "70vh",
     display: "flex",
     flexDirection: "column",
-    justifyContent: "center"
+    justifyContent: "center",
+    boxShadow: "0 0 20px rgba(0,0,0,0.3)"
   };
 
   const btn = {
@@ -193,105 +230,93 @@ export default function App() {
     marginTop: 6
   };
 
-  const currentPost = posts[currentIndex];
-
   return (
-    <div style={{ padding: 20, maxWidth: 500, margin: "auto" }}>
-      <h1>🧠 Think App</h1>
+    <div style={{ padding: 20, maxWidth: 500, margin: "auto", background: "#0f0f0f", minHeight: "100vh" }}>
+      <h1 style={{ color: "white" }}>🧠 Think App</h1>
 
       {!user ? (
         <button style={btn} onClick={login}>Login</button>
       ) : (
         <>
-          <p>👤 {user.displayName}</p>
+          <p style={{ color: "white" }}>👤 {user.displayName}</p>
           <button style={btn} onClick={logout}>Logout</button>
 
-          <h3>Followers: {myProfile?.followers?.length || 0}</h3>
-          <h3>Following: {myProfile?.following?.length || 0}</h3>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Write..."
+          />
+          <button style={btn} onClick={handlePost}>Post</button>
         </>
       )}
 
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Write..."
-      />
-
-      <button style={btn} onClick={handlePost}>Post</button>
-
-      <h2>🔔 Notifications</h2>
+      <h3 style={{ color: "white" }}>🔔 Notifications</h3>
       {notifications.map((n, i) => (
-        <div key={i}>{n.type} from {n.from}</div>
+        <div key={i} style={{ color: "white" }}>
+          {n.type} from {n.from}
+        </div>
       ))}
 
-      <h2>🧠 Focus Mode</h2>
+      {/* SWIPE AREA */}
+      <div
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
+        {currentPost && (
+          <div style={card}>
+            <p><b>{userMap[currentPost.createdBy]?.name}</b></p>
+            <p style={{ fontSize: 20 }}>{currentPost.content}</p>
+            <p>💎 {currentPost.impact}</p>
 
-      {currentPost && (
-        <div style={card}>
-          <p><b>{users.find(u => u.id === currentPost.createdBy)?.name}</b></p>
-          <p style={{ fontSize: 18 }}>{currentPost.content}</p>
-          <p>💎 {currentPost.impact}</p>
-
-          <button style={btn} onClick={() => giveImpact(currentPost)}>
-            Impact ⚡
-          </button>
-
-          {/* COMMENTS */}
-          {comments
-            .filter(c => c.postId === currentPost.id)
-            .map(c => {
-              const u = users.find(x => x.id === c.userId);
-              return (
-                <div key={c.id}>
-                  💬 {u?.name}: {c.text}
-                </div>
-              );
-            })}
-
-          <input
-            placeholder="Reply..."
-            value={commentText[currentPost.id] || ""}
-            onChange={(e) =>
-              setCommentText(prev => ({
-                ...prev,
-                [currentPost.id]: e.target.value
-              }))
-            }
-          />
-
-          <button style={btn} onClick={() => addComment(currentPost.id)}>
-            Reply
-          </button>
-
-          {currentPost.createdBy !== user?.uid && (
-            <button style={btn} onClick={() => followUser(currentPost.createdBy)}>
-              Follow
+            <button
+              style={{
+                ...btn,
+                transform: clicked ? "scale(1.2)" : "scale(1)",
+                transition: "0.2s"
+              }}
+              onClick={() => giveImpact(currentPost)}
+            >
+              ⚡ Impact
             </button>
-          )}
-        </div>
-      )}
 
-      {/* NAVIGATION */}
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 20 }}>
-        <button
-          style={btn}
-          onClick={() =>
-            setCurrentIndex(i => (i > 0 ? i - 1 : i))
-          }
-        >
-          ⬆ Prev
-        </button>
+            <button style={btn} onClick={() => setShowComments(!showComments)}>
+              💬 Comments
+            </button>
 
-        <button
-          style={btn}
-          onClick={() =>
-            setCurrentIndex(i =>
-              i < posts.length - 1 ? i + 1 : i
-            )
-          }
-        >
-          Next ⬇
-        </button>
+            {showComments && (
+              <>
+                {comments
+                  .filter(c => c.postId === currentPost.id)
+                  .map(c => (
+                    <div key={c.id}>
+                      💬 {userMap[c.userId]?.name}: {c.text}
+                    </div>
+                  ))}
+
+                <input
+                  placeholder="Reply..."
+                  value={commentText[currentPost.id] || ""}
+                  onChange={(e) =>
+                    setCommentText(prev => ({
+                      ...prev,
+                      [currentPost.id]: e.target.value
+                    }))
+                  }
+                />
+
+                <button style={btn} onClick={() => addComment(currentPost.id)}>
+                  Reply
+                </button>
+              </>
+            )}
+
+            {currentPost.createdBy !== user?.uid && (
+              <button style={btn} onClick={() => followUser(currentPost.createdBy)}>
+                Follow
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
