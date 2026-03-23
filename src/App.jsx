@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
+import PostCard from "./components/PostCard";
 
 import {
   collection,
@@ -28,12 +29,8 @@ export default function App() {
   const [notifications, setNotifications] = useState([]);
 
   const [text, setText] = useState("");
-  const [commentText, setCommentText] = useState({});
   const [user, setUser] = useState(null);
-
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [clicked, setClicked] = useState(false);
-  const [showComments, setShowComments] = useState(false);
 
   const auth = getAuth();
 
@@ -110,13 +107,16 @@ export default function App() {
     return () => unsub();
   }, [user]);
 
-  // ⚡ USER MAP (performance boost)
+  // ⚡ USER MAP (performance)
   const userMap = Object.fromEntries(users.map(u => [u.id, u]));
 
-  // 🧠 ALGORITHM (impact + freshness)
+  // 🧠 ALGORITHM
   const sortedPosts = [...posts].sort((a, b) => {
-    const scoreA = (a.impact || 0) - (Date.now() - (a.createdAt || 0)) * 0.000001;
-    const scoreB = (b.impact || 0) - (Date.now() - (b.createdAt || 0)) * 0.000001;
+    const scoreA =
+      (a.impact || 0) - (Date.now() - (a.createdAt || 0)) * 0.000001;
+    const scoreB =
+      (b.impact || 0) - (Date.now() - (b.createdAt || 0)) * 0.000001;
+
     return scoreB - scoreA;
   });
 
@@ -143,9 +143,6 @@ export default function App() {
     if (p.createdBy === user.uid) return;
     if (p.impactedBy?.includes(user.uid)) return;
 
-    setClicked(true);
-    setTimeout(() => setClicked(false), 200);
-
     await updateDoc(doc(db, "posts", p.id), {
       impact: (p.impact || 0) + 1,
       impactedBy: [...(p.impactedBy || []), user.uid]
@@ -159,16 +156,14 @@ export default function App() {
   };
 
   // 💬 COMMENT
-  const addComment = async (postId) => {
-    if (!user || !commentText[postId]) return;
+  const addComment = async (postId, text) => {
+    if (!user || !text) return;
 
     await addDoc(collection(db, "comments"), {
       postId,
-      text: commentText[postId],
+      text,
       userId: user.uid
     });
-
-    setCommentText(prev => ({ ...prev, [postId]: "" }));
   };
 
   // 👥 FOLLOW
@@ -207,55 +202,43 @@ export default function App() {
     }
   };
 
-  // 🎨 UI
-  const card = {
-    background: "rgba(255,255,255,0.05)",
-    backdropFilter: "blur(10px)",
-    padding: 20,
-    borderRadius: 20,
-    color: "white",
-    height: "70vh",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-    boxShadow: "0 0 20px rgba(0,0,0,0.3)"
-  };
-
-  const btn = {
-    padding: "6px 10px",
-    background: "#111",
-    color: "white",
-    border: "none",
-    borderRadius: 8,
-    marginTop: 6
-  };
-
   return (
-    <div style={{ padding: 20, maxWidth: 500, margin: "auto", background: "#0f0f0f", minHeight: "100vh" }}>
-      <h1 style={{ color: "white" }}>🧠 Think App</h1>
+    <div className="h-screen bg-black text-white flex flex-col items-center justify-center">
 
+      {/* LOGIN */}
       {!user ? (
-        <button style={btn} onClick={login}>Login</button>
+        <button
+          onClick={login}
+          className="bg-white text-black px-4 py-2 rounded-xl"
+        >
+          Login
+        </button>
       ) : (
-        <>
-          <p style={{ color: "white" }}>👤 {user.displayName}</p>
-          <button style={btn} onClick={logout}>Logout</button>
+        <div className="absolute top-4 right-4 text-sm">
+          👤 {user.displayName}
+          <button onClick={logout} className="ml-2 text-red-400">
+            Logout
+          </button>
+        </div>
+      )}
 
-          <textarea
+      {/* POST INPUT */}
+      {user && (
+        <div className="absolute top-4 left-4 flex gap-2">
+          <input
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Write..."
+            className="bg-zinc-800 px-3 py-2 rounded-lg text-sm outline-none"
           />
-          <button style={btn} onClick={handlePost}>Post</button>
-        </>
-      )}
-
-      <h3 style={{ color: "white" }}>🔔 Notifications</h3>
-      {notifications.map((n, i) => (
-        <div key={i} style={{ color: "white" }}>
-          {n.type} from {n.from}
+          <button
+            onClick={handlePost}
+            className="bg-white text-black px-3 py-2 rounded-lg"
+          >
+            Post
+          </button>
         </div>
-      ))}
+      )}
 
       {/* SWIPE AREA */}
       <div
@@ -263,59 +246,15 @@ export default function App() {
         onTouchEnd={handleTouchEnd}
       >
         {currentPost && (
-          <div style={card}>
-            <p><b>{userMap[currentPost.createdBy]?.name}</b></p>
-            <p style={{ fontSize: 20 }}>{currentPost.content}</p>
-            <p>💎 {currentPost.impact}</p>
-
-            <button
-              style={{
-                ...btn,
-                transform: clicked ? "scale(1.2)" : "scale(1)",
-                transition: "0.2s"
-              }}
-              onClick={() => giveImpact(currentPost)}
-            >
-              ⚡ Impact
-            </button>
-
-            <button style={btn} onClick={() => setShowComments(!showComments)}>
-              💬 Comments
-            </button>
-
-            {showComments && (
-              <>
-                {comments
-                  .filter(c => c.postId === currentPost.id)
-                  .map(c => (
-                    <div key={c.id}>
-                      💬 {userMap[c.userId]?.name}: {c.text}
-                    </div>
-                  ))}
-
-                <input
-                  placeholder="Reply..."
-                  value={commentText[currentPost.id] || ""}
-                  onChange={(e) =>
-                    setCommentText(prev => ({
-                      ...prev,
-                      [currentPost.id]: e.target.value
-                    }))
-                  }
-                />
-
-                <button style={btn} onClick={() => addComment(currentPost.id)}>
-                  Reply
-                </button>
-              </>
-            )}
-
-            {currentPost.createdBy !== user?.uid && (
-              <button style={btn} onClick={() => followUser(currentPost.createdBy)}>
-                Follow
-              </button>
-            )}
-          </div>
+          <PostCard
+            post={currentPost}
+            user={user}
+            userMap={userMap}
+            comments={comments}
+            addComment={addComment}
+            followUser={followUser}
+            giveImpact={giveImpact}
+          />
         )}
       </div>
     </div>
