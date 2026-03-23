@@ -31,161 +31,213 @@ export default function App() {
 
   const auth = getAuth();
 
-  // LOGIN
+  // 🔐 LOGIN
   const login = async () => {
-    const provider = new GoogleAuthProvider();
-    const result = await signInWithPopup(auth, provider);
-    setUser(result.user);
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      setUser(result.user);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const logout = async () => {
-    await signOut(auth);
-    setUser(null);
+    try {
+      await signOut(auth);
+      setUser(null);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  // USER SETUP
+  // 👤 USER SETUP
   const setupUser = async (u) => {
-    const ref = doc(db, "users", u.uid);
-    const snap = await getDoc(ref);
+    try {
+      const ref = doc(db, "users", u.uid);
+      const snap = await getDoc(ref);
 
-    if (!snap.exists()) {
-      await setDoc(ref, {
-        name: u.displayName,
-        followers: [],
-        following: []
-      });
+      if (!snap.exists()) {
+        await setDoc(ref, {
+          name: u.displayName,
+          followers: [],
+          following: []
+        });
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
   useEffect(() => {
-    onAuthStateChanged(auth, (u) => {
+    const unsub = onAuthStateChanged(auth, (u) => {
       if (u) {
         setUser(u);
         setupUser(u);
       }
     });
+    return () => unsub();
   }, []);
 
-  // POSTS (REALTIME + SAFE)
+  // 🧠 POSTS (SAFE)
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "posts"), (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      try {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-      const sorted = data.sort((a, b) => {
-        const scoreA =
-          (a.impact || 0) - (Date.now() - (a.createdAt || 0)) * 0.000001;
-        const scoreB =
-          (b.impact || 0) - (Date.now() - (b.createdAt || 0)) * 0.000001;
+        const sorted = data.sort((a, b) => {
+          const scoreA =
+            (a?.impact || 0) - (Date.now() - (a?.createdAt || 0)) * 0.000001;
+          const scoreB =
+            (b?.impact || 0) - (Date.now() - (b?.createdAt || 0)) * 0.000001;
 
-        return scoreB - scoreA;
-      });
+          return scoreB - scoreA;
+        });
 
-      setPosts(sorted);
+        setPosts(sorted || []);
 
-      // 🔥 KEEP CURRENT POST VALID
-      setCurrentPost(prev => {
-        if (!prev) return sorted[0] || null;
+        setCurrentPost(prev => {
+          if (!prev) return sorted?.[0] || null;
 
-        const stillExists = sorted.find(p => p.id === prev.id);
-        return stillExists || sorted[0] || null;
-      });
+          const stillExists = (sorted || []).find(p => p.id === prev.id);
+          return stillExists || sorted?.[0] || null;
+        });
+
+      } catch (e) {
+        console.error("POST ERROR:", e);
+      }
     });
 
     return () => unsub();
   }, []);
 
-  // COMMENTS
+  // 💬 COMMENTS
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "comments"), (snap) => {
-      setComments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      try {
+        setComments(snap.docs.map(d => ({ id: d.id, ...d.data() })) || []);
+      } catch (e) {
+        console.error(e);
+      }
     });
     return () => unsub();
   }, []);
 
-  // USERS (SAFE)
+  // 👥 USERS
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "users"), (snap) => {
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      try {
+        setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })) || []);
+      } catch (e) {
+        console.error(e);
+      }
     });
     return () => unsub();
   }, []);
 
-  // SAFE USER MAP
+  // 🧠 SAFE MAP
   const userMap = Object.fromEntries((users || []).map(u => [u.id, u]));
 
-  // POST
+  // ✍️ POST
   const handlePost = async () => {
-    if (!user || !text.trim()) return;
+    if (!user || !text?.trim()) return;
 
-    await addDoc(collection(db, "posts"), {
-      content: text,
-      impact: 0,
-      createdBy: user.uid,
-      impactedBy: [],
-      createdAt: Date.now()
-    });
+    try {
+      await addDoc(collection(db, "posts"), {
+        content: text,
+        impact: 0,
+        createdBy: user.uid,
+        impactedBy: [],
+        createdAt: Date.now()
+      });
 
-    setText("");
+      setText("");
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  // IMPACT
+  // ⚡ IMPACT
   const giveImpact = async (p) => {
     if (!user || !p) return;
     if (p.createdBy === user.uid) return;
     if (p.impactedBy?.includes(user.uid)) return;
 
-    await updateDoc(doc(db, "posts", p.id), {
-      impact: (p.impact || 0) + 1,
-      impactedBy: [...(p.impactedBy || []), user.uid]
-    });
+    try {
+      await updateDoc(doc(db, "posts", p.id), {
+        impact: (p.impact || 0) + 1,
+        impactedBy: [...(p.impactedBy || []), user.uid]
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  // COMMENT
+  // 💬 COMMENT
   const addComment = async (postId, text) => {
     if (!user || !text) return;
 
-    await addDoc(collection(db, "comments"), {
-      postId,
-      text,
-      userId: user.uid
-    });
+    try {
+      await addDoc(collection(db, "comments"), {
+        postId,
+        text,
+        userId: user.uid
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  // FOLLOW (FULL SAFE)
+  // 👥 FOLLOW (SAFE)
   const followUser = async (targetId) => {
-    if (!user || !users.length) return;
+    if (!user || !(users || []).length) return;
 
-    const me = users.find(u => u.id === user.uid);
-    const target = users.find(u => u.id === targetId);
+    try {
+      const me = (users || []).find(u => u.id === user.uid);
+      const target = (users || []).find(u => u.id === targetId);
 
-    if (!me || !target) return;
-    if (me.following?.includes(targetId)) return;
+      if (!me || !target) return;
+      if (me.following?.includes(targetId)) return;
 
-    await updateDoc(doc(db, "users", user.uid), {
-      following: [...(me.following || []), targetId]
-    });
+      await updateDoc(doc(db, "users", user.uid), {
+        following: [...(me.following || []), targetId]
+      });
 
-    await updateDoc(doc(db, "users", targetId), {
-      followers: [...(target.followers || []), user.uid]
-    });
+      await updateDoc(doc(db, "users", targetId), {
+        followers: [...(target.followers || []), user.uid]
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  // NAVIGATION (SAFE)
+  // 🔁 NAVIGATION (ULTRA SAFE)
   const goNext = () => {
-    if (!currentPost) return;
-    const index = posts.findIndex(p => p.id === currentPost.id);
+    if (!currentPost || !(posts || []).length) return;
+
+    const index = (posts || []).findIndex(p => p.id === currentPost.id);
+    if (index === -1) return;
+
     const next = posts[index + 1];
     if (next) setCurrentPost(next);
   };
 
   const goPrev = () => {
-    if (!currentPost) return;
-    const index = posts.findIndex(p => p.id === currentPost.id);
+    if (!currentPost || !(posts || []).length) return;
+
+    const index = (posts || []).findIndex(p => p.id === currentPost.id);
+    if (index === -1) return;
+
     const prev = posts[index - 1];
     if (prev) setCurrentPost(prev);
   };
 
-  // EMPTY STATE
+  // 🛑 HARD GUARD (NO CRASH)
+  if (!Array.isArray(posts) || !Array.isArray(users) || !Array.isArray(comments)) {
+    return null;
+  }
+
+  // EMPTY
   if (!currentPost) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#f3efe7]">
