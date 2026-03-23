@@ -31,6 +31,8 @@ export default function App() {
   const [commentText, setCommentText] = useState({});
   const [user, setUser] = useState(null);
 
+  const [currentIndex, setCurrentIndex] = useState(0);
+
   const auth = getAuth();
 
   // 🔐 LOGIN
@@ -69,7 +71,7 @@ export default function App() {
     });
   }, []);
 
-  // ⚡ POSTS REALTIME
+  // ⚡ REALTIME
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "posts"), (snap) => {
       setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -77,7 +79,6 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // ⚡ COMMENTS REALTIME
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "comments"), (snap) => {
       setComments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -85,7 +86,6 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // ⚡ USERS REALTIME
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "users"), (snap) => {
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -93,7 +93,6 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // ⚡ NOTIFICATIONS
   useEffect(() => {
     if (!user) return;
 
@@ -177,9 +176,12 @@ export default function App() {
   // 🎨 UI
   const card = {
     background: "white",
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16
+    padding: 20,
+    borderRadius: 16,
+    minHeight: "300px",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center"
   };
 
   const btn = {
@@ -190,6 +192,8 @@ export default function App() {
     borderRadius: 8,
     marginTop: 6
   };
+
+  const currentPost = posts[currentIndex];
 
   return (
     <div style={{ padding: 20, maxWidth: 500, margin: "auto" }}>
@@ -217,61 +221,78 @@ export default function App() {
 
       <h2>🔔 Notifications</h2>
       {notifications.map((n, i) => (
-        <div key={i} style={card}>
-          {n.type} from {n.from}
-        </div>
+        <div key={i}>{n.type} from {n.from}</div>
       ))}
 
-      <h2>🌍 Feed</h2>
+      <h2>🧠 Focus Mode</h2>
 
-      {posts.map(p => {
-        const author = users.find(u => u.id === p.createdBy);
+      {currentPost && (
+        <div style={card}>
+          <p><b>{users.find(u => u.id === currentPost.createdBy)?.name}</b></p>
+          <p style={{ fontSize: 18 }}>{currentPost.content}</p>
+          <p>💎 {currentPost.impact}</p>
 
-        return (
-          <div key={p.id} style={card}>
-            <p><b>{author?.name || "User"}</b></p>
-            <p>{p.content}</p>
-            <p>💎 {p.impact}</p>
+          <button style={btn} onClick={() => giveImpact(currentPost)}>
+            Impact ⚡
+          </button>
 
-            <button style={btn} onClick={() => giveImpact(p)}>
-              Impact ⚡
+          {/* COMMENTS */}
+          {comments
+            .filter(c => c.postId === currentPost.id)
+            .map(c => {
+              const u = users.find(x => x.id === c.userId);
+              return (
+                <div key={c.id}>
+                  💬 {u?.name}: {c.text}
+                </div>
+              );
+            })}
+
+          <input
+            placeholder="Reply..."
+            value={commentText[currentPost.id] || ""}
+            onChange={(e) =>
+              setCommentText(prev => ({
+                ...prev,
+                [currentPost.id]: e.target.value
+              }))
+            }
+          />
+
+          <button style={btn} onClick={() => addComment(currentPost.id)}>
+            Reply
+          </button>
+
+          {currentPost.createdBy !== user?.uid && (
+            <button style={btn} onClick={() => followUser(currentPost.createdBy)}>
+              Follow
             </button>
+          )}
+        </div>
+      )}
 
-            {/* COMMENTS */}
-            {comments
-              .filter(c => c.postId === p.id)
-              .map(c => {
-                const u = users.find(x => x.id === c.userId);
-                return (
-                  <div key={c.id}>
-                    💬 {u?.name}: {c.text}
-                  </div>
-                );
-              })}
+      {/* NAVIGATION */}
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 20 }}>
+        <button
+          style={btn}
+          onClick={() =>
+            setCurrentIndex(i => (i > 0 ? i - 1 : i))
+          }
+        >
+          ⬆ Prev
+        </button>
 
-            <input
-              placeholder="Reply..."
-              value={commentText[p.id] || ""}
-              onChange={(e) =>
-                setCommentText(prev => ({
-                  ...prev,
-                  [p.id]: e.target.value
-                }))
-              }
-            />
-
-            <button style={btn} onClick={() => addComment(p.id)}>
-              Reply
-            </button>
-
-            {p.createdBy !== user?.uid && (
-              <button style={btn} onClick={() => followUser(p.createdBy)}>
-                Follow
-              </button>
-            )}
-          </div>
-        );
-      })}
+        <button
+          style={btn}
+          onClick={() =>
+            setCurrentIndex(i =>
+              i < posts.length - 1 ? i + 1 : i
+            )
+          }
+        >
+          Next ⬇
+        </button>
+      </div>
     </div>
   );
 }
