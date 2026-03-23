@@ -9,8 +9,7 @@ import {
   setDoc,
   getDoc,
   query,
-  where,
-  onSnapshot
+  where
 } from "firebase/firestore";
 
 import {
@@ -21,24 +20,29 @@ import {
   signOut
 } from "firebase/auth";
 
-export default function App() {
-  const [posts, setPosts] = useState([]);
-  const [comments, setComments] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [notifications, setNotifications] = useState([]);
+import useRealtime from "./hooks/useRealtime";
+import Navbar from "./components/Navbar";
+import PostCard from "./components/PostCard";
+import Notification from "./components/Notification";
 
+export default function App() {
   const [text, setText] = useState("");
   const [commentText, setCommentText] = useState({});
-
   const [user, setUser] = useState(null);
 
   const auth = getAuth();
 
-  // 🔐 LOGIN
+  const posts = useRealtime(collection(db, "posts"));
+  const comments = useRealtime(collection(db, "comments"));
+  const users = useRealtime(collection(db, "users"));
+
+  const [notifications, setNotifications] = useState([]);
+
+  // LOGIN
   const login = async () => {
     const provider = new GoogleAuthProvider();
-    const result = await signInWithPopup(auth, provider);
-    setUser(result.user);
+    const res = await signInWithPopup(auth, provider);
+    setUser(res.user);
   };
 
   const logout = async () => {
@@ -46,7 +50,7 @@ export default function App() {
     setUser(null);
   };
 
-  // 👤 USER SETUP
+  // USER SETUP
   const setupUser = async (u) => {
     const ref = doc(db, "users", u.uid);
     const snap = await getDoc(ref);
@@ -60,7 +64,6 @@ export default function App() {
     }
   };
 
-  // AUTH
   useEffect(() => {
     onAuthStateChanged(auth, (u) => {
       if (u) {
@@ -70,25 +73,7 @@ export default function App() {
     });
   }, []);
 
-  // 🔄 REALTIME
-  useEffect(() => {
-    return onSnapshot(collection(db, "posts"), snap =>
-      setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    );
-  }, []);
-
-  useEffect(() => {
-    return onSnapshot(collection(db, "comments"), snap =>
-      setComments(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    );
-  }, []);
-
-  useEffect(() => {
-    return onSnapshot(collection(db, "users"), snap =>
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    );
-  }, []);
-
+  // NOTIFICATIONS
   useEffect(() => {
     if (!user) return;
 
@@ -97,12 +82,12 @@ export default function App() {
       where("to", "==", user.uid)
     );
 
-    return onSnapshot(q, snap =>
-      setNotifications(snap.docs.map(d => d.data()))
-    );
+    return onSnapshot(q, (snap) => {
+      setNotifications(snap.docs.map(d => d.data()));
+    });
   }, [user]);
 
-  // ✍️ POST
+  // POST
   const handlePost = async () => {
     if (!user || !text.trim()) return;
 
@@ -116,25 +101,18 @@ export default function App() {
     setText("");
   };
 
-  // ⚡ IMPACT
+  // IMPACT
   const giveImpact = async (p) => {
     if (!user) return;
     if (p.createdBy === user.uid) return;
-    if (p.impactedBy?.includes(user.uid)) return;
 
     await updateDoc(doc(db, "posts", p.id), {
       impact: (p.impact || 0) + 1,
       impactedBy: [...(p.impactedBy || []), user.uid]
     });
-
-    await addDoc(collection(db, "notifications"), {
-      type: "impact",
-      to: p.createdBy,
-      from: user.displayName
-    });
   };
 
-  // 💬 COMMENT
+  // COMMENT
   const addComment = async (postId) => {
     if (!user || !commentText[postId]) return;
 
@@ -147,7 +125,7 @@ export default function App() {
     setCommentText(prev => ({ ...prev, [postId]: "" }));
   };
 
-  // 👥 FOLLOW
+  // FOLLOW
   const followUser = async (targetId) => {
     if (!user) return;
 
@@ -163,114 +141,39 @@ export default function App() {
     await updateDoc(doc(db, "users", targetId), {
       followers: [...(target.followers || []), user.uid]
     });
-
-    await addDoc(collection(db, "notifications"), {
-      type: "follow",
-      to: targetId,
-      from: user.displayName
-    });
-  };
-
-  const myProfile = users.find(u => u.id === user?.uid);
-
-  // 🎨 UI
-  const card = {
-    background: "white",
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16
-  };
-
-  const btn = {
-    padding: "6px 10px",
-    background: "#111",
-    color: "white",
-    border: "none",
-    borderRadius: 8,
-    marginTop: 6
   };
 
   return (
     <div style={{ padding: 20, maxWidth: 500, margin: "auto" }}>
-      <h1>🧠 Think App</h1>
-
-      {!user ? (
-        <button style={btn} onClick={login}>Login</button>
-      ) : (
-        <>
-          <p>👤 {user.displayName}</p>
-          <button style={btn} onClick={logout}>Logout</button>
-
-          <h3>Followers: {myProfile?.followers?.length || 0}</h3>
-          <h3>Following: {myProfile?.following?.length || 0}</h3>
-        </>
-      )}
+      
+      <Navbar user={user} login={login} logout={logout} />
 
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder="Write something..."
+        placeholder="Write..."
       />
 
-      <button style={btn} onClick={handlePost}>Post</button>
+      <button onClick={handlePost}>Post</button>
 
-      <h2>🔔 Notifications</h2>
-      {notifications.map((n, i) => (
-        <div key={i} style={card}>
-          {n.type} from {n.from}
-        </div>
-      ))}
+      <Notification notifications={notifications} />
 
       <h2>🌍 Feed</h2>
 
-      {posts.map(p => {
-        const author = users.find(u => u.id === p.createdBy);
-
-        return (
-          <div key={p.id} style={card}>
-            <p><b>{author?.name || "User"}</b></p>
-            <p>{p.content}</p>
-            <p>💎 {p.impact}</p>
-
-            <button style={btn} onClick={() => giveImpact(p)}>
-              Impact ⚡
-            </button>
-
-            {/* COMMENTS */}
-            {comments
-              .filter(c => c.postId === p.id)
-              .map(c => {
-                const u = users.find(x => x.id === c.userId);
-                return (
-                  <div key={c.id}>
-                    💬 {u?.name}: {c.text}
-                  </div>
-                );
-              })}
-
-            <input
-              placeholder="Reply..."
-              value={commentText[p.id] || ""}
-              onChange={(e) =>
-                setCommentText(prev => ({
-                  ...prev,
-                  [p.id]: e.target.value
-                }))
-              }
-            />
-
-            <button style={btn} onClick={() => addComment(p.id)}>
-              Reply
-            </button>
-
-            {p.createdBy !== user?.uid && (
-              <button style={btn} onClick={() => followUser(p.createdBy)}>
-                Follow
-              </button>
-            )}
-          </div>
-        );
-      })}
+      {posts.map(p => (
+        <PostCard
+          key={p.id}
+          p={p}
+          users={users}
+          user={user}
+          giveImpact={giveImpact}
+          followUser={followUser}
+          comments={comments}
+          commentText={commentText}
+          setCommentText={setCommentText}
+          addComment={addComment}
+        />
+      ))}
     </div>
   );
 }
