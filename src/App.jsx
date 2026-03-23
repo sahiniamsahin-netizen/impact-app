@@ -26,7 +26,6 @@ export default function App() {
   const [posts, setPosts] = useState([]);
   const [comments, setComments] = useState([]);
   const [users, setUsers] = useState([]);
-  const [notifications, setNotifications] = useState([]);
 
   const [text, setText] = useState("");
   const [user, setUser] = useState(null);
@@ -34,7 +33,7 @@ export default function App() {
 
   const auth = getAuth();
 
-  // 🔐 LOGIN
+  // LOGIN
   const login = async () => {
     const provider = new GoogleAuthProvider();
     const result = await signInWithPopup(auth, provider);
@@ -46,7 +45,7 @@ export default function App() {
     setUser(null);
   };
 
-  // 👤 USER SETUP
+  // USER SETUP
   const setupUser = async (u) => {
     const ref = doc(db, "users", u.uid);
     const snap = await getDoc(ref);
@@ -60,7 +59,6 @@ export default function App() {
     }
   };
 
-  // 🔄 AUTH
   useEffect(() => {
     onAuthStateChanged(auth, (u) => {
       if (u) {
@@ -70,7 +68,7 @@ export default function App() {
     });
   }, []);
 
-  // ⚡ REALTIME
+  // REALTIME
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "posts"), (snap) => {
       setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -92,25 +90,10 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  useEffect(() => {
-    if (!user) return;
-
-    const q = query(
-      collection(db, "notifications"),
-      where("to", "==", user.uid)
-    );
-
-    const unsub = onSnapshot(q, (snap) => {
-      setNotifications(snap.docs.map(d => d.data()));
-    });
-
-    return () => unsub();
-  }, [user]);
-
-  // ⚡ USER MAP
+  // USER MAP
   const userMap = Object.fromEntries(users.map(u => [u.id, u]));
 
-  // 🧠 ALGORITHM (impact + freshness)
+  // ALGORITHM
   const sortedPosts = [...posts].sort((a, b) => {
     const scoreA =
       (a.impact || 0) - (Date.now() - (a.createdAt || 0)) * 0.000001;
@@ -122,7 +105,7 @@ export default function App() {
 
   const currentPost = sortedPosts[currentIndex];
 
-  // ✍️ POST
+  // POST
   const handlePost = async () => {
     if (!user || !text.trim()) return;
 
@@ -137,7 +120,7 @@ export default function App() {
     setText("");
   };
 
-  // ⚡ IMPACT
+  // IMPACT
   const giveImpact = async (p) => {
     if (!user) return;
     if (p.createdBy === user.uid) return;
@@ -147,15 +130,9 @@ export default function App() {
       impact: (p.impact || 0) + 1,
       impactedBy: [...(p.impactedBy || []), user.uid]
     });
-
-    await addDoc(collection(db, "notifications"), {
-      type: "impact",
-      to: p.createdBy,
-      from: user.displayName
-    });
   };
 
-  // 💬 COMMENT
+  // COMMENT
   const addComment = async (postId, text) => {
     if (!user || !text) return;
 
@@ -166,7 +143,7 @@ export default function App() {
     });
   };
 
-  // 👥 FOLLOW
+  // FOLLOW
   const followUser = async (targetId) => {
     if (!user) return;
 
@@ -184,7 +161,7 @@ export default function App() {
     });
   };
 
-  // ⌨️ KEYBOARD NAVIGATION
+  // KEYBOARD NAV
   useEffect(() => {
     const handleKey = (e) => {
       if (e.key === "ArrowDown") {
@@ -202,7 +179,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#f3efe7] flex flex-col items-center justify-center px-4">
 
-      {/* LOGIN */}
       {!user ? (
         <button
           onClick={login}
@@ -219,7 +195,6 @@ export default function App() {
         </div>
       )}
 
-      {/* POST INPUT */}
       {user && (
         <div className="absolute top-4 left-6 flex gap-2">
           <input
@@ -237,7 +212,6 @@ export default function App() {
         </div>
       )}
 
-      {/* POST */}
       {currentPost && (
         <PostCard
           post={currentPost}
@@ -250,7 +224,6 @@ export default function App() {
         />
       )}
 
-      {/* NAVIGATION */}
       <div className="mt-6 flex justify-between w-full max-w-2xl text-gray-600 text-sm">
         <button onClick={() => setCurrentIndex(i => i > 0 ? i - 1 : i)}>
           ↑ Previous
