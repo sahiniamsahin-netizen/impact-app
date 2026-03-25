@@ -1,16 +1,21 @@
 import { useEffect, useState } from "react";
-import { onSnapshot } from "firebase/firestore";
+import { db } from "../firebase";
+import { collection, onSnapshot } from "firebase/firestore";
 
-export default function useRealtime(ref) {
-  const [data, setData] = useState([]);
+export function useRealtime() {
+  const [posts, setPosts] = useState([]);
 
   useEffect(() => {
-    const unsub = onSnapshot(ref, (snap) => {
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const unsub = onSnapshot(collection(db, "posts"), (snap) => {
+      const data = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data()
+      }));
+      setPosts(data);
     });
 
     return () => unsub();
-  }, [ref]);
+  }, []);
 
-  return data;
+  return { posts };
 }
